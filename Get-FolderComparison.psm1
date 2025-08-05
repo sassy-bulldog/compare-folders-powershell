@@ -38,37 +38,62 @@ function Get-FolderComparison {
         Write-Host "Scanning directory: $Root" -ForegroundColor Cyan
         $files = @()
         $count = 0
+        $skipped = 0
         
-        Get-ChildItem -Path $Root -Recurse -File | ForEach-Object {
-            $count++
-            if ($count % 100 -eq 0) {
-                Write-Progress -Activity "$Label files" -Status "Found $count files so far..." -PercentComplete -1
-            }
-            
-            $files += [PSCustomObject]@{
-                FullPath      = $_.FullName
-                RelativePath  = $_.FullName.Substring($Root.Length).TrimStart('\','/')
-                Name          = $_.Name
-                Length        = $_.Length
-                LastWriteTime = $_.LastWriteTimeUtc
-                MD5           = $null
+        Get-ChildItem -Path $Root -Recurse -File -ErrorAction SilentlyContinue | ForEach-Object {
+            try {
+                # Test if file is accessible before adding to list
+                if ([System.IO.File]::Exists($_.FullName)) {
+                    $count++
+                    if ($count % 100 -eq 0) {
+                        $statusMsg = "Found $count files"
+                        if ($skipped -gt 0) { $statusMsg += " (skipped $skipped inaccessible)" }
+                        Write-Progress -Activity "$Label files" -Status "$statusMsg..." -PercentComplete -1
+                    }
+                    
+                    $files += [PSCustomObject]@{
+                        FullPath      = $_.FullName
+                        RelativePath  = $_.FullName.Substring($Root.Length).TrimStart('\','/')
+                        Name          = $_.Name
+                        Length        = $_.Length
+                        LastWriteTime = $_.LastWriteTimeUtc
+                        MD5           = $null
+                    }
+                } else {
+                    $skipped++
+                }
+            } catch {
+                $skipped++
+                Write-Warning "Skipping inaccessible file: $($_.FullName)"
             }
         }
         
         Write-Progress -Activity "$Label files" -Completed
-        Write-Host "Found $count files in $Label directory" -ForegroundColor Green
+        $resultMsg = "Found $count files in $Label directory"
+        if ($skipped -gt 0) { $resultMsg += " (skipped $skipped inaccessible files)" }
+        Write-Host $resultMsg -ForegroundColor Green
         return $files
     }
 
     function Get-MD5($Path) {
-        $md5 = [MD5]::Create()
-        $stream = [File]::OpenRead($Path)
         try {
-            $hash = $md5.ComputeHash($stream)
-            return ([BitConverter]::ToString($hash) -replace '-', '').ToLower()
-        } finally {
-            $stream.Dispose()
-            $md5.Dispose()
+            if (-not ([System.IO.File]::Exists($Path))) {
+                Write-Warning "File not found or inaccessible: $Path"
+                return "FILE_NOT_FOUND"
+            }
+            
+            $md5 = [MD5]::Create()
+            $stream = [File]::OpenRead($Path)
+            try {
+                $hash = $md5.ComputeHash($stream)
+                return ([BitConverter]::ToString($hash) -replace '-', '').ToLower()
+            } finally {
+                if ($stream) { $stream.Dispose() }
+                if ($md5) { $md5.Dispose() }
+            }
+        } catch {
+            Write-Warning "Error calculating MD5 for '$Path': $($_.Exception.Message)"
+            return "ERROR_CALCULATING_MD5"
         }
     }
     
