@@ -1,0 +1,23 @@
+# Name as it appears on the Actions tab of GitHub (for current repo; this get's ignored if called from another repo)
+name: 'Validate Code Owners'
+
+# Controls when the workflow will run
+on:
+  push:
+    paths:
+      - '.github/workflows/codeowners.yml'
+      - '**/CODEOWNERS'
+  pull_request_target:
+    paths:
+      - '.github/workflows/codeowners.yml'
+      - '**/CODEOWNERS'
+    types:
+      - opened
+      - synchronize
+      - reopened
+
+jobs:
+  codeowners:
+    name: Shared Workflow
+    uses: sassy-bulldog/.github/.github/workflows/codeowners.yml@v0.2.2 # x-release-please-version
+    secrets: inherit
