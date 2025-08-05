@@ -93,6 +93,8 @@ function Get-FolderComparison {
                 SourcePath   = $src.FullPath
                 DestinationPath = $dst.FullPath
                 RelativePath = $rel
+                Index        = $null
+                DuplicateOf  = $null
             }
             $matchedSrc[$rel] = $true
             $matchedDst[$rel] = $true
@@ -129,6 +131,8 @@ function Get-FolderComparison {
                 SourcePath   = $src.FullPath
                 DestinationPath = $dst.FullPath
                 RelativePath = "$($src.RelativePath) -> $($dst.RelativePath)"
+                Index        = $null
+                DuplicateOf  = $null
             }
             $matchedSrc[$src.RelativePath] = $true
             $matchedDst[$dst.RelativePath] = $true
@@ -150,6 +154,8 @@ function Get-FolderComparison {
                     SourcePath   = $src.FullPath
                     DestinationPath = $dst.FullPath
                     RelativePath = "$($src.RelativePath) -> $($dst.RelativePath)"
+                    Index        = $null
+                    DuplicateOf  = $null
                 }
                 $matchedSrc[$src.RelativePath] = $true
                 $matchedDst[$dst.RelativePath] = $true
@@ -166,6 +172,8 @@ function Get-FolderComparison {
             SourcePath   = $src.FullPath
             DestinationPath = $null
             RelativePath = $src.RelativePath
+            Index        = $null
+            DuplicateOf  = $null
         }
     }
     $dstUnmatched = $dstFiles | Where-Object { -not $matchedDst.ContainsKey($_.RelativePath) }
@@ -175,6 +183,59 @@ function Get-FolderComparison {
             SourcePath   = $null
             DestinationPath = $dst.FullPath
             RelativePath = $dst.RelativePath
+            Index        = $null
+            DuplicateOf  = $null
+        }
+    }
+
+    # 5. Post-process: Add indices and detect duplicates (1-based indexing)
+    for ($i = 0; $i -lt $results.Count; $i++) {
+        $results[$i].Index = $i + 1
+    }
+
+    # Build MD5 lookup for all destination files for duplicate detection
+    $allDstByMD5 = @{}
+    foreach ($f in $dstFiles) {
+        if (-not $f.MD5) { $f.MD5 = Get-MD5 $f.FullPath }
+        if (-not $allDstByMD5.ContainsKey($f.MD5)) {
+            $allDstByMD5[$f.MD5] = @()
+        }
+        $allDstByMD5[$f.MD5] += $f
+    }
+
+    # Check removed files for duplicates in destination
+    $removedResults = $results | Where-Object Type -eq "Removed"
+    foreach ($removedResult in $removedResults) {
+        $srcFile = $srcFiles | Where-Object FullPath -eq $removedResult.SourcePath
+        if ($srcFile -and $srcFile.MD5 -and $allDstByMD5.ContainsKey($srcFile.MD5)) {
+            $duplicates = $allDstByMD5[$srcFile.MD5]
+            if ($duplicates.Count -gt 0) {
+                # Find the result index for the first duplicate
+                $duplicateResult = $results | Where-Object { $_.DestinationPath -eq $duplicates[0].FullPath }
+                if ($duplicateResult) {
+                    $removedResult.Type = "RemovedDuplicate"
+                    $removedResult.DestinationPath = $duplicates[0].FullPath
+                    $removedResult.DuplicateOf = $duplicateResult.Index
+                }
+            }
+        }
+    }
+
+    # Mark duplicates within destination files
+    $destResults = $results | Where-Object { $null -ne $_.DestinationPath }
+    $processedMD5 = @{}
+    
+    foreach ($result in $destResults) {
+        $dstFile = $dstFiles | Where-Object FullPath -eq $result.DestinationPath
+        if ($dstFile -and $dstFile.MD5) {
+            if ($processedMD5.ContainsKey($dstFile.MD5)) {
+                # This is a duplicate
+                $originalIndex = $processedMD5[$dstFile.MD5]
+                $result.DuplicateOf = $originalIndex
+            } else {
+                # First occurrence of this MD5
+                $processedMD5[$dstFile.MD5] = $result.Index
+            }
         }
     }
 

@@ -304,5 +304,90 @@ Describe "Get-FolderComparison" {
             $removed | Should -HaveCount 1
             $added | Should -HaveCount 1
         }
+        
+        It "Should detect removed duplicates" {
+            # Create scenario where a file is removed but exists as duplicate in destination
+            $srcFile1 = Join-Path $SourcePath 'document.txt'
+            $srcFile2 = Join-Path $SourcePath 'copy_of_document.txt'
+            $destFile1 = Join-Path $DestinationPath 'document.txt'
+            
+            $content = 'Same content in all files'
+            $content | Out-File -FilePath $srcFile1 -Encoding UTF8
+            $content | Out-File -FilePath $srcFile2 -Encoding UTF8
+            $content | Out-File -FilePath $destFile1 -Encoding UTF8
+            
+            # Set same timestamp for identical files
+            $timestamp = Get-Date
+            (Get-Item $srcFile1).LastWriteTimeUtc = $timestamp
+            (Get-Item $destFile1).LastWriteTimeUtc = $timestamp
+            
+            $result = Get-FolderComparison -SourcePath $SourcePath -DestinationPath $DestinationPath
+            $result | Should -HaveCount 2
+            
+            # Should have one unchanged and one removed duplicate
+            $unchanged = $result | Where-Object { $_.Type -eq "Unchanged" }
+            $removedDuplicate = $result | Where-Object { $_.Type -eq "RemovedDuplicate" }
+            
+            $unchanged | Should -HaveCount 1
+            $removedDuplicate | Should -HaveCount 1
+            $removedDuplicate.DuplicateOf | Should -Not -BeNullOrEmpty
+        }
+        
+        It "Should detect duplicate files in destination" {
+            # Create scenario with duplicate files in destination
+            $srcFile = Join-Path $SourcePath 'original.txt'
+            $destFile1 = Join-Path $DestinationPath 'original.txt'
+            $destFile2 = Join-Path $DestinationPath 'duplicate.txt'
+            
+            $content = 'Content that will be duplicated'
+            $content | Out-File -FilePath $srcFile -Encoding UTF8
+            $content | Out-File -FilePath $destFile1 -Encoding UTF8
+            $content | Out-File -FilePath $destFile2 -Encoding UTF8
+            
+            # Set same timestamp for identical files
+            $timestamp = Get-Date
+            (Get-Item $srcFile).LastWriteTimeUtc = $timestamp
+            (Get-Item $destFile1).LastWriteTimeUtc = $timestamp
+            
+            $result = Get-FolderComparison -SourcePath $SourcePath -DestinationPath $DestinationPath
+            $result | Should -HaveCount 2
+            
+            # Should have one unchanged and one added (marked as duplicate)
+            $unchanged = $result | Where-Object { $_.Type -eq "Unchanged" }
+            $added = $result | Where-Object { $_.Type -eq "Added" }
+            
+            $unchanged | Should -HaveCount 1
+            $added | Should -HaveCount 1
+            $added.DuplicateOf | Should -Not -BeNullOrEmpty
+        }
+        
+        It "Should assign unique indices to all results" {
+            # Create multiple files to verify indexing
+            $srcFile1 = Join-Path $SourcePath 'file1.txt'
+            $srcFile2 = Join-Path $SourcePath 'file2.txt'
+            $destFile1 = Join-Path $DestinationPath 'file1.txt'
+            $destFile3 = Join-Path $DestinationPath 'file3.txt'
+            
+            'Content 1' | Out-File -FilePath $srcFile1 -Encoding UTF8
+            'Content 2' | Out-File -FilePath $srcFile2 -Encoding UTF8
+            'Content 1' | Out-File -FilePath $destFile1 -Encoding UTF8
+            'Content 3' | Out-File -FilePath $destFile3 -Encoding UTF8
+            
+            # Set same timestamp for file1
+            $timestamp = Get-Date
+            (Get-Item $srcFile1).LastWriteTimeUtc = $timestamp
+            (Get-Item $destFile1).LastWriteTimeUtc = $timestamp
+            
+            $result = Get-FolderComparison -SourcePath $SourcePath -DestinationPath $DestinationPath
+            
+            # All results should have unique, sequential indices
+            $indices = $result | ForEach-Object { $_.Index } | Sort-Object
+            $indices | Should -HaveCount $result.Count
+            $indices[0] | Should -Be 1
+            $indices[-1] | Should -Be $result.Count
+            
+            # No duplicate indices
+            ($indices | Group-Object | Where-Object Count -gt 1) | Should -BeNullOrEmpty
+        }
     }
 }
