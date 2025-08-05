@@ -34,9 +34,18 @@ function Get-FolderComparison {
         throw "Destination path does not exist or is not a directory: $DestinationPath"
     }
 
-    function Get-FileList($Root) {
+    function Get-FileList($Root, $Label = "Scanning") {
+        Write-Host "Scanning directory: $Root" -ForegroundColor Cyan
+        $files = @()
+        $count = 0
+        
         Get-ChildItem -Path $Root -Recurse -File | ForEach-Object {
-            [PSCustomObject]@{
+            $count++
+            if ($count % 100 -eq 0) {
+                Write-Progress -Activity "$Label files" -Status "Found $count files so far..." -PercentComplete -1
+            }
+            
+            $files += [PSCustomObject]@{
                 FullPath      = $_.FullName
                 RelativePath  = $_.FullName.Substring($Root.Length).TrimStart('\','/')
                 Name          = $_.Name
@@ -45,6 +54,10 @@ function Get-FolderComparison {
                 MD5           = $null
             }
         }
+        
+        Write-Progress -Activity "$Label files" -Completed
+        Write-Host "Found $count files in $Label directory" -ForegroundColor Green
+        return $files
     }
 
     function Get-MD5($Path) {
@@ -66,11 +79,11 @@ function Get-FolderComparison {
         }
     }
 
-    $srcFiles = Get-FileList $SourcePath
-    $dstFiles = Get-FileList $DestinationPath
+    $srcFiles = Get-FileList $SourcePath "Source"
+    $dstFiles = Get-FileList $DestinationPath "Destination"
     
     $totalFiles = $srcFiles.Count + $dstFiles.Count
-    Write-Host "Found $($srcFiles.Count) source files and $($dstFiles.Count) destination files ($totalFiles total)" -ForegroundColor Cyan
+    Write-Host "Total: $($srcFiles.Count) source files and $($dstFiles.Count) destination files ($totalFiles total)" -ForegroundColor Cyan
 
     # Index by relative path
     $srcByRel = @{}
