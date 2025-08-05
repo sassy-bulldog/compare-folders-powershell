@@ -58,9 +58,19 @@ function Get-FolderComparison {
             $md5.Dispose()
         }
     }
+    
+    function Show-Progress($Current, $Total, $Activity) {
+        if ($Total -gt 0) {
+            $percent = [math]::Round(($Current / $Total) * 100, 1)
+            Write-Progress -Activity $Activity -Status "$Current of $Total files processed ($percent%)" -PercentComplete $percent
+        }
+    }
 
     $srcFiles = Get-FileList $SourcePath
     $dstFiles = Get-FileList $DestinationPath
+    
+    $totalFiles = $srcFiles.Count + $dstFiles.Count
+    Write-Host "Found $($srcFiles.Count) source files and $($dstFiles.Count) destination files ($totalFiles total)" -ForegroundColor Cyan
 
     # Index by relative path
     $srcByRel = @{}
@@ -72,6 +82,7 @@ function Get-FolderComparison {
     $results = @()
     $matchedSrc = @{}
     $matchedDst = @{}
+    $md5ProcessedCount = 0
 
     foreach ($rel in $srcByRel.Keys) {
         if ($dstByRel.ContainsKey($rel)) {
@@ -80,8 +91,20 @@ function Get-FolderComparison {
             if ($src.Length -eq $dst.Length -and $src.LastWriteTime -eq $dst.LastWriteTime) {
                 $status = "Unchanged"
             } else {
-                if (-not $src.MD5) { $src.MD5 = Get-MD5 $src.FullPath }
-                if (-not $dst.MD5) { $dst.MD5 = Get-MD5 $dst.FullPath }
+                if (-not $src.MD5) { 
+                    $src.MD5 = Get-MD5 $src.FullPath 
+                    $md5ProcessedCount++
+                    if ($md5ProcessedCount % 10 -eq 0 -and $totalFiles -gt 50) {
+                        Show-Progress $md5ProcessedCount $totalFiles "Comparing files (MD5 calculation)"
+                    }
+                }
+                if (-not $dst.MD5) { 
+                    $dst.MD5 = Get-MD5 $dst.FullPath 
+                    $md5ProcessedCount++
+                    if ($md5ProcessedCount % 10 -eq 0 -and $totalFiles -gt 50) {
+                        Show-Progress $md5ProcessedCount $totalFiles "Comparing files (MD5 calculation)"
+                    }
+                }
                 if ($src.MD5 -eq $dst.MD5) {
                     $status = "Unchanged"
                 } else {
@@ -105,9 +128,30 @@ function Get-FolderComparison {
     $srcUnmatched = $srcFiles | Where-Object { -not $matchedSrc.ContainsKey($_.RelativePath) }
     $dstUnmatched = $dstFiles | Where-Object { -not $matchedDst.ContainsKey($_.RelativePath) }
 
-    # Build MD5 index for unmatched files
-    foreach ($f in $srcUnmatched) { if (-not $f.MD5) { $f.MD5 = Get-MD5 $f.FullPath } }
-    foreach ($f in $dstUnmatched) { if (-not $f.MD5) { $f.MD5 = Get-MD5 $f.FullPath } }
+    # Build MD5 index for unmatched files with progress tracking
+    $totalUnmatched = $srcUnmatched.Count + $dstUnmatched.Count
+    $processed = 0
+    
+    if ($totalUnmatched -gt 0) {
+        Write-Host "Calculating MD5 checksums for $totalUnmatched unmatched files..." -ForegroundColor Yellow
+    }
+    
+    foreach ($f in $srcUnmatched) { 
+        if (-not $f.MD5) { 
+            $f.MD5 = Get-MD5 $f.FullPath 
+            $processed++
+            if ($totalUnmatched -gt 10) { Show-Progress $processed $totalUnmatched "Computing MD5 checksums" }
+        }
+    }
+    foreach ($f in $dstUnmatched) { 
+        if (-not $f.MD5) { 
+            $f.MD5 = Get-MD5 $f.FullPath 
+            $processed++
+            if ($totalUnmatched -gt 10) { Show-Progress $processed $totalUnmatched "Computing MD5 checksums" }
+        }
+    }
+    
+    if ($totalUnmatched -gt 10) { Write-Progress -Activity "Computing MD5 checksums" -Completed }
     $srcByMD5 = @{}
     foreach ($f in $srcUnmatched) { $srcByMD5[$f.MD5] = $f }
     $dstByMD5 = @{}
