@@ -23,7 +23,9 @@ function Get-FolderComparison {
         [Parameter(Mandatory)]
         [string]$SourcePath,
         [Parameter(Mandatory)]
-        [string]$DestinationPath
+        [string]$DestinationPath,
+        [Parameter()]
+        [switch]$ForceLocal = $false
     )
 
     # Validate paths exist
@@ -32,6 +34,52 @@ function Get-FolderComparison {
     }
     if (-not (Test-Path $DestinationPath -PathType Container)) {
         throw "Destination path does not exist or is not a directory: $DestinationPath"
+    }
+
+    # Check Egnyte Drive status once at the beginning (only if not forcing local behavior)
+    $sourceIsEgnyte = $false
+    $destIsEgnyte = $false
+    
+    function Test-IsEgnyteDrive($Path) {
+        try {
+            $drive = Get-PSDrive | Where-Object { $Path -like "$($_.Root)*" } | Select-Object -First 1
+            if ($drive -and $drive.Provider.Name -eq "FileSystem") {
+                # Check if it's an Egnyte drive by looking at the root or display root
+                $root = [System.IO.Path]::GetPathRoot($Path)
+                if ($root -like "\\EgnyteDrive\*" -or $drive.DisplayRoot -like "\\EgnyteDrive\*") {
+                    return $true
+                }
+                
+                # Additional check for Egnyte mounted drives
+                try {
+                    $driveInfo = Get-WmiObject -Class Win32_LogicalDisk | Where-Object { $_.DeviceID -eq $root.TrimEnd('\') }
+                    if ($driveInfo -and $driveInfo.ProviderName -like "*EgnyteDrive*") {
+                        return $true
+                    }
+                } catch {
+                    # Ignore WMI errors
+                }
+            }
+            return $false
+        } catch {
+            Write-Warning "Error checking if path is Egnyte Drive: $($_.Exception.Message)"
+            return $false
+        }
+    }
+
+    
+    if (-not $ForceLocal) {
+        $sourceIsEgnyte = Test-IsEgnyteDrive $SourcePath
+        $destIsEgnyte = Test-IsEgnyteDrive $DestinationPath
+        
+        if ($sourceIsEgnyte -or $destIsEgnyte) {
+            Write-Host "Egnyte Drive detected - MD5 calculation will be skipped for faster processing" -ForegroundColor Cyan
+            if ($sourceIsEgnyte) { Write-Host "  Source is on Egnyte Drive: $SourcePath" -ForegroundColor Yellow }
+            if ($destIsEgnyte) { Write-Host "  Destination is on Egnyte Drive: $DestinationPath" -ForegroundColor Yellow }
+            Write-Host "  Use -ForceLocal switch to force MD5 calculation if files are locally synchronized" -ForegroundColor Gray
+        }
+    } else {
+        Write-Host "ForceLocal enabled - treating all paths as local (MD5 calculation enabled)" -ForegroundColor Green
     }
 
     function Get-FileList($Root, $Label = "Scanning") {
@@ -114,8 +162,26 @@ function Get-FolderComparison {
         return $files
     }
 
+    # Helper function to determine if MD5 should be skipped for a specific file
+    function Test-ShouldSkipMD5($FilePath) {
+        if ($ForceLocal) {
+            return $false  # Never skip if ForceLocal is enabled
+        }
+        
+        # Check based on which root path this file belongs to
+        if ($FilePath.StartsWith($SourcePath) -and $sourceIsEgnyte) {
+            return $true
+        }
+        if ($FilePath.StartsWith($DestinationPath) -and $destIsEgnyte) {
+            return $true
+        }
+        
+        return $false
+    }
+
+    # Replace the Compute-MD5 function with Get-MD5Hash
     function Get-MD5($Path) {
-        function Compute-MD5($Path) {
+        function Get-MD5Hash($Path) {
             $md5 = [MD5]::Create()
             $stream = [File]::OpenRead($Path)
             try {
@@ -139,7 +205,7 @@ function Get-FolderComparison {
                 Start-Sleep -Seconds 30
             }
 
-            return Compute-MD5 $Path
+            return Get-MD5Hash $Path
         } catch {
             $maxRetries = 2
             $retryDelay = 5
@@ -151,7 +217,7 @@ function Get-FolderComparison {
                     Write-Warning "Attempt ${attempt}: Device not functioning for '$Path'. Retrying in $retryDelay seconds due to possible cloud/network delay..."
                     Start-Sleep -Seconds $retryDelay
                     try {
-                        return Compute-MD5 $Path
+                        return Get-MD5Hash $Path
                     } catch {
                         $errorMsg = $_.Exception.Message
                         if ($errorMsg -notlike "*A device attached to the system is not functioning*") {
@@ -219,9 +285,22 @@ function Get-FolderComparison {
         if ($dstByRel.ContainsKey($rel)) {
             $src = $srcByRel[$rel]
             $dst = $dstByRel[$rel]
+            
+            # Use the centralized logic to determine if we should skip MD5
+            $shouldSkipMD5 = (Test-ShouldSkipMD5 $src.FullPath) -or (Test-ShouldSkipMD5 $dst.FullPath)
+            
             if ($src.Length -eq $dst.Length -and $src.LastWriteTime -eq $dst.LastWriteTime) {
                 $status = "Unchanged"
+            } elseif ($shouldSkipMD5) {
+                # For Egnyte drives, rely on file size and timestamp only
+                Write-Verbose "Egnyte Drive detected - using size/timestamp comparison only for: $rel"
+                if ($src.Length -eq $dst.Length) {
+                    $status = "Unchanged"  # Assume unchanged if same size
+                } else {
+                    $status = "Updated"
+                }
             } else {
+                # Normal MD5 comparison for non-Egnyte files or when ForceLocal is enabled
                 if (-not $src.MD5) { 
                     $src.MD5 = Get-MD5 $src.FullPath 
                     $md5ProcessedCount++
@@ -242,6 +321,7 @@ function Get-FolderComparison {
                     $status = "Updated"
                 }
             }
+            
             $results += [PSCustomObject]@{
                 Type         = $status
                 SourcePath   = $src.FullPath
@@ -283,10 +363,20 @@ function Get-FolderComparison {
     }
     
     if ($totalUnmatched -gt 10) { Write-Progress -Activity "Computing MD5 checksums" -Completed }
+    
+    # Only add to MD5 lookup if not an Egnyte drive file (or if ForceLocal is enabled)
     $srcByMD5 = @{}
-    foreach ($f in $srcUnmatched) { $srcByMD5[$f.MD5] = $f }
+    foreach ($f in $srcUnmatched) { 
+        if ($f.MD5 -and $f.MD5 -ne "EGNYTE_DRIVE_SKIP_MD5") {
+            $srcByMD5[$f.MD5] = $f 
+        }
+    }
     $dstByMD5 = @{}
-    foreach ($f in $dstUnmatched) { $dstByMD5[$f.MD5] = $f }
+    foreach ($f in $dstUnmatched) { 
+        if ($f.MD5 -and $f.MD5 -ne "EGNYTE_DRIVE_SKIP_MD5") {
+            $dstByMD5[$f.MD5] = $f 
+        }
+    }
 
     foreach ($md5 in $srcByMD5.Keys) {
         if ($dstByMD5.ContainsKey($md5)) {
