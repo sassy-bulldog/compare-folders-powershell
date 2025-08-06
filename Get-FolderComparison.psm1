@@ -61,10 +61,49 @@ function Get-FolderComparison {
                     }
                 } else {
                     $skipped++
+                    # Enhanced debugging for failed file existence check
+                    Write-Warning "File existence check failed for: $($_.FullName)"
+                    Write-Warning "  └─ File appears in directory listing but [System.IO.File]::Exists() returned false"
+                    Write-Warning "  └─ Path length: $($_.FullName.Length) characters"
+                    if ($_.FullName -like "*Egnyte*" -or $_.FullName -like "*OneDrive*" -or $_.FullName -like "*Dropbox*") {
+                        Write-Warning "  └─ Cloud storage file detected - may not be synced locally or accessible"
+                    }
+                    if ($_.FullName.Length -gt 260) {
+                        Write-Warning "  └─ Path exceeds 260 character limit - this may cause access issues"
+                    }
                 }
             } catch {
                 $skipped++
-                Write-Warning "Skipping inaccessible file: $($_.FullName)"
+                $errorType = $_.Exception.GetType().Name
+                Write-Warning "Exception processing file: $($_.FullName)"
+                Write-Warning "  └─ Error Type: $errorType"
+                Write-Warning "  └─ Error Message: $($_.Exception.Message)"
+                Write-Warning "  └─ Path length: $($_.FullName.Length) characters"
+                
+                # Check for cloud service specific errors
+                if ($errorType -eq "IOException" -or 
+                    $errorType -eq "UnauthorizedAccessException" -or
+                    $errorType -eq "DirectoryServiceException" -or
+                    $_.Exception.Message -like "*network*" -or 
+                    $_.Exception.Message -like "*timeout*" -or
+                    $_.Exception.Message -like "*rate*" -or
+                    $_.Exception.Message -like "*egnyte*" -or
+                    $_.Exception.Message -like "*cloud*" -or
+                    $_.Exception.Message -like "*access denied*" -or
+                    $_.Exception.Message -like "*sharing violation*") {
+                    Write-Warning "  └─ This appears to be a cloud service or network related error"
+                    Write-Warning "  └─ Consider checking network connectivity or Egnyte sync status"
+                }
+                
+                # Check for long path issues
+                if ($_.FullName.Length -gt 260) {
+                    Write-Warning "  └─ Long path detected - this may be the cause of the error"
+                }
+                
+                # Check for special characters
+                if ($_.FullName -match '[^\x00-\x7F]' -or $_.FullName -match '[\[\]{}()]') {
+                    Write-Warning "  └─ Special characters or Unicode detected in path - this may cause issues"
+                }
             }
         }
         
@@ -76,12 +115,7 @@ function Get-FolderComparison {
     }
 
     function Get-MD5($Path) {
-        try {
-            if (-not ([System.IO.File]::Exists($Path))) {
-                Write-Warning "File not found or inaccessible: $Path"
-                return "FILE_NOT_FOUND"
-            }
-            
+        function Compute-MD5($Path) {
             $md5 = [MD5]::Create()
             $stream = [File]::OpenRead($Path)
             try {
@@ -91,9 +125,68 @@ function Get-FolderComparison {
                 if ($stream) { $stream.Dispose() }
                 if ($md5) { $md5.Dispose() }
             }
+        }
+
+        try {
+            # Check if the drive is accessible; if not, wait and retry until available
+            $drive = ([System.IO.Path]::GetPathRoot($Path))
+            while (-not (Test-Path $drive) -or -not ([System.IO.File]::Exists($Path))) {
+                if (-not (Test-Path $drive)) {
+                    Write-Warning "Drive $drive is not accessible. Waiting 30 seconds before retrying..."
+                } elseif (-not ([System.IO.File]::Exists($Path))) {
+                    Write-Warning "File not found or inaccessible: $Path. Waiting 30 seconds before retrying..."
+                }
+                Start-Sleep -Seconds 30
+            }
+
+            return Compute-MD5 $Path
         } catch {
-            Write-Warning "Error calculating MD5 for '$Path': $($_.Exception.Message)"
-            return "ERROR_CALCULATING_MD5"
+            $maxRetries = 2
+            $retryDelay = 5
+            $attempt = 0
+            $errorMsg = $_.Exception.Message
+            if ($errorMsg -like "*A device attached to the system is not functioning*") {
+                while ($attempt -lt $maxRetries) {
+                    $attempt++
+                    Write-Warning "Attempt ${attempt}: Device not functioning for '$Path'. Retrying in $retryDelay seconds due to possible cloud/network delay..."
+                    Start-Sleep -Seconds $retryDelay
+                    try {
+                        return Compute-MD5 $Path
+                    } catch {
+                        $errorMsg = $_.Exception.Message
+                        if ($errorMsg -notlike "*A device attached to the system is not functioning*") {
+                            break
+                        }
+                    }
+                }
+                Write-Warning "Failed after $maxRetries retries: Device not functioning for '$Path'."
+                Write-Warning "  └─ Error Message: $errorMsg"
+                Write-Warning "  └─ Path length: $($Path.Length) characters"
+                if ($Path -like "*Egnyte*" -or $Path -like "*OneDrive*" -or $Path -like "*Dropbox*") {
+                    Write-Warning "  └─ Cloud storage file detected - may not be synced locally or accessible"
+                }
+                if ($Path.Length -gt 260) {
+                    Write-Warning "  └─ Path exceeds 260 character limit - this may cause access issues"
+                }
+                if ($Path -match '[^\x00-\x7F]' -or $Path -match '[\[\]{}()]') {
+                    Write-Warning "  └─ Special characters or Unicode detected in path - this may cause issues"
+                }
+                return "ERROR_DEVICE_NOT_FUNCTIONING"
+            } else {
+                Write-Warning "Error calculating MD5 for '$Path': $errorMsg"
+                Write-Warning "  └─ Error Type: $($_.Exception.GetType().Name)"
+                Write-Warning "  └─ Path length: $($Path.Length) characters"
+                if ($Path -like "*Egnyte*" -or $Path -like "*OneDrive*" -or $Path -like "*Dropbox*") {
+                    Write-Warning "  └─ Cloud storage file detected - may not be synced locally or accessible"
+                }
+                if ($Path.Length -gt 260) {
+                    Write-Warning "  └─ Path exceeds 260 character limit - this may cause access issues"
+                }
+                if ($Path -match '[^\x00-\x7F]' -or $Path -match '[\[\]{}()]') {
+                    Write-Warning "  └─ Special characters or Unicode detected in path - this may cause issues"
+                }
+                return "ERROR_CALCULATING_MD5"
+            }
         }
     }
     
@@ -321,6 +414,7 @@ function Get-FolderComparison {
         }
     }
 
+    $results | Export-Csv -Path (Join-Path -Path $DestinationPath ChildPath "comparison-results.csv") -NoTypeInformation
     return $results
 }
 
