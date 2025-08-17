@@ -15,5 +15,5 @@ on:
 jobs:
   stale:
     name: Shared Workflow
-    uses: sassy-bulldog/.github/.github/workflows/stale.yml@v0.2.2 # x-release-please-version
+    uses: sassy-bulldog/.github/.github/workflows/stale.yml@v0.3.0 # x-release-please-version
     secrets: inherit
