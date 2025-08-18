@@ -1,3 +1,4 @@
+# version: 1.0.0
 # Name as it appears on the Actions tab of GitHub (for current repo; this get's ignored if called from another repo)
 name: 'Validate Commit Title'
 
@@ -18,4 +19,4 @@ jobs:
     name: Controls to Standardize Pull Requests
     permissions:
       pull-requests: write
-    uses: sassy-bulldog/.github/.github/workflows/pr-controls.yml@v0.2.2 # x-release-please-version
+    uses: sassy-bulldog/.github/.github/workflows/pr-controls.yml@v0.3.0 # x-release-please-version
