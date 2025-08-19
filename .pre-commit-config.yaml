@@ -1,21 +1,33 @@
+# This file configures pre-commit hooks for the repository.
+# It defines the tools and checks that will run automatically before each
+# commit, helping to enforce code quality, formatting, and best practices.
+# For more information, see:
+#   https://pre-commit.com/
+---
 fail_fast: false
 minimum_pre_commit_version: "2.6.0"
+
+ci:
+  autofix_commit_msg: 'chore(pre-commit.ci): Auto fixes [...]'
+  autoupdate_commit_msg: 'chore(pre-commit.ci): Auto update of pre-commit hooks'
+
 repos:
   # https://pre-commit.com/hooks.html
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v6.0.0
     hooks:
-      # - id: check-illegal-windows-names
-      - id: check-case-conflict
-      - id: check-json
-      - id: check-toml
-      - id: check-xml
-      - id: check-yaml
-      - id: check-merge-conflict
-      - id: end-of-file-fixer
-      - id: trailing-whitespace
+    # - id: check-illegal-windows-names
+    - id: check-case-conflict
+    - id: check-json
+    - id: check-toml
+    - id: check-xml
+    - id: check-yaml
+    - id: check-merge-conflict
+    - id: end-of-file-fixer
+    - id: trailing-whitespace
+
   - repo: https://github.com/igorshubovych/markdownlint-cli
     rev: v0.45.0
     hooks:
-      - id: markdownlint-fix
-        exclude: ^(CHANGELOG|LICENSE|BLANK_README|.github/).*$
+    - id: markdownlint-fix
+      exclude: ^(CHANGELOG|LICENSE|.github/).*$
