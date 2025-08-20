@@ -1,4 +1,7 @@
-# Name as it appears on the Actions tab of GitHub (for current repo; this get's ignored if called from another repo)
+# version: 1.0.0
+# Name as it appears on the Actions tab of GitHub
+# (for current repo; this get's ignored if called from another repo)
+---
 name: 'Validate Commit Title'
 
 # Controls when the workflow will run
@@ -13,9 +16,14 @@ on:
       - synchronize
       - reopened
 
+permissions:
+  contents: read
+
 jobs:
   commit_title:
     name: Controls to Standardize Pull Requests
     permissions:
+      contents: read
       pull-requests: write
-    uses: sassy-bulldog/.github/.github/workflows/pr-controls.yml@v0.2.2 # x-release-please-version
+    # yamllint disable-line rule:line-length
+    uses: sassy-bulldog/.github/.github/workflows/pr-controls.yml@v0.3.1 # x-release-please-version
