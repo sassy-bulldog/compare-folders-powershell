@@ -1,3 +1,4 @@
+<!-- markdownlint-disable MD033 -->
 <!-- Improved compatibility of back to top link: See: https://github.com/othneildrew/Best-README-Template/pull/73 -->
 <a id="readme-top"></a>
 <!--
@@ -338,3 +339,4 @@ By using pre-commit.ci, you can ensure that your code follows best practices and
 [Bootstrap-url]: https://getbootstrap.com
 [JQuery.com]: https://img.shields.io/badge/jQuery-0769AD?style=for-the-badge&logo=jquery&logoColor=white
 [JQuery-url]: https://jquery.com
+<!-- markdownlint-enable MD033 -->
