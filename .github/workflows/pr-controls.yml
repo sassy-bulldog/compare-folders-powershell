@@ -4,6 +4,9 @@
 ---
 name: 'Validate Commit Title'
 
+permissions:
+  contents: read
+
 # Controls when the workflow will run
 on:
   pull_request:
@@ -16,14 +19,12 @@ on:
       - synchronize
       - reopened
 
-permissions:
-  contents: read
-
 jobs:
   commit_title:
     name: Controls to Standardize Pull Requests
     permissions:
       contents: read
       pull-requests: write
+      labels: write
     # yamllint disable-line rule:line-length
     uses: sassy-bulldog/.github/.github/workflows/pr-controls.yml@v0.3.1 # x-release-please-version
