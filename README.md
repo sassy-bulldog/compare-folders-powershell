@@ -25,12 +25,14 @@
     <img src="images/logo.png" alt="Logo" width="80" height="80">
   </a>
 <br />
+</div>
 [![Contributors][contributors-shield]][contributors-url]
 [![Forks][forks-shield]][forks-url]
 [![Stargazers][stars-shield]][stars-url]
 [![Issues][issues-shield]][issues-url]
 [![MIT License][license-shield]][license-url]
 [![LinkedIn][linkedin-shield]][linkedin-url]
+<div align="center">
   <p align="center">
     An awesome README template to jumpstart your projects!
     <br />
