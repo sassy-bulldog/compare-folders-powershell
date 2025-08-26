@@ -1,7 +1,11 @@
 # version: 1.0.0
 # Name as it appears on the Actions tab of GitHub
 # (for current repo; this get's ignored if called from another repo)
+---
 name: 'Issue & PR Maintenance'
+
+permissions:
+  contents: read
 
 # Controls when the workflow will run
 on:
